@@ -251,7 +251,9 @@ def build_digest(now_local: datetime, sms_mode=False):
         lines.append("")
         lines.append("\U0001F4BB Tech (Hacker News Top)")
         for title, link, desc in fetch_hn_top(n=5):
-            lines.append(f"• {title}{desc}")
+            lines.append(f"• {title}")
+            if desc:
+                lines.append(f"  {desc}")
             lines.append(f"  {link}")
 
         msg = "\n".join(lines)
