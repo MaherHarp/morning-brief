@@ -69,41 +69,72 @@ def fetch_hn_top(n=5, timeout=20):
     return out
 
 
-def build_digest(now_local: datetime):
+def build_digest(now_local: datetime, sms_mode=False):
     lines = []
-    lines.append(f"\U0001F5DE Morning Brief — {now_local.strftime('%a %b %d, %Y')} (6:30am)")
-    lines.append("")
+    date_str = now_local.strftime('%a %b %d')
+    
+    if sms_mode:
+        # Short SMS version (no links, just headlines)
+        lines.append(f"📰 Brief {date_str}")
+        lines.append("🌍 World:")
+        for region, url in list(BBC_FEEDS.items())[:3]:  # Only top 3 regions for SMS
+            top = pick_top_from_rss(url)
+            if top:
+                title, _ = top
+                # Truncate long titles
+                short_title = title[:60] + "..." if len(title) > 60 else title
+                lines.append(f"• {region}: {short_title}")
+        
+        lines.append("⚽ Sports:")
+        for title, _ in fetch_espn_top(n=2):  # Only 2 for SMS
+            short_title = title[:60] + "..." if len(title) > 60 else title
+            lines.append(f"• {short_title}")
+        
+        lines.append("💻 Tech:")
+        for title, _ in fetch_hn_top(n=3):  # Only 3 for SMS
+            short_title = title[:60] + "..." if len(title) > 60 else title
+            lines.append(f"• {short_title}")
+        
+        msg = "\n".join(lines)
+        # Limit SMS to ~800 chars (some carriers support longer but be safe)
+        if len(msg) > 800:
+            msg = msg[:750] + "\n...(truncated)"
+    else:
+        # Full email version with links
+        lines.append(f"\U0001F5DE Morning Brief — {now_local.strftime('%a %b %d, %Y')} (6:30am)")
+        lines.append("")
 
-    lines.append("\U0001F30D World (BBC by region)")
-    for region, url in BBC_FEEDS.items():
-        top = pick_top_from_rss(url)
-        if not top:
-            lines.append(f"• {region}: (no items)")
-            continue
-        title, link = top
-        lines.append(f"• {region}: {title}")
-        lines.append(f"  {link}")
+        lines.append("\U0001F30D World (BBC by region)")
+        for region, url in BBC_FEEDS.items():
+            top = pick_top_from_rss(url)
+            if not top:
+                lines.append(f"• {region}: (no items)")
+                continue
+            title, link = top
+            lines.append(f"• {region}: {title}")
+            lines.append(f"  {link}")
 
-    lines.append("")
-    lines.append("\U0001F3C8 Sports (ESPN Top)")
-    for title, link in fetch_espn_top(n=3):
-        lines.append(f"• {title}")
-        lines.append(f"  {link}")
+        lines.append("")
+        lines.append("\U0001F3C8 Sports (ESPN Top)")
+        for title, link in fetch_espn_top(n=3):
+            lines.append(f"• {title}")
+            lines.append(f"  {link}")
 
-    lines.append("")
-    lines.append("\U0001F4BB Tech (Hacker News Top)")
-    for title, link in fetch_hn_top(n=5):
-        lines.append(f"• {title}")
-        lines.append(f"  {link}")
+        lines.append("")
+        lines.append("\U0001F4BB Tech (Hacker News Top)")
+        for title, link in fetch_hn_top(n=5):
+            lines.append(f"• {title}")
+            lines.append(f"  {link}")
 
-    msg = "\n".join(lines)
-    max_chars = 7000
-    if len(msg) > max_chars:
-        msg = msg[: max_chars - 50] + "\n…(truncated)"
+        msg = "\n".join(lines)
+        max_chars = 7000
+        if len(msg) > max_chars:
+            msg = msg[: max_chars - 50] + "\n…(truncated)"
+    
     return msg
 
 
-def send_email(subject: str, body: str):
+def send_email(subject: str, body: str, sms_mode=False):
     smtp_host = os.environ.get("SMTP_HOST", "smtp.gmail.com")
     smtp_port = int(os.environ.get("SMTP_PORT", "587"))
     smtp_user = os.environ["SMTP_USER"]
@@ -118,9 +149,11 @@ def send_email(subject: str, body: str):
     if sms_gateway:
         # Use SMS gateway to send as text message
         to_email = sms_gateway
-        print(f"Using SMS gateway: {to_email} (will arrive as text/iMessage)")
+        print(f"Using SMS gateway: {to_email[:20]}... (will arrive as text/iMessage)")
+        if not sms_mode:
+            print("Warning: SMS gateway detected but full message will be sent (may be truncated by carrier)")
 
-    print(f"Sending email from {from_email} to {to_email}")
+    print(f"Sending email from {from_email} to {to_email[:30]}...")
 
     msg = MIMEText(body, "plain", "utf-8")
     msg["Subject"] = subject
@@ -163,12 +196,20 @@ def main():
     if test_mode:
         print(f"✓ TEST MODE: Running at {now_local} (bypassing time check)")
 
+    # Check if SMS gateway is being used
+    sms_gateway = os.environ.get("SMS_GATEWAY", "").strip()
+    sms_mode = bool(sms_gateway)
+    
     print("Building digest...")
-    digest = build_digest(now_local)
+    if sms_mode:
+        print("SMS mode: Creating short version (no links)")
+        digest = build_digest(now_local, sms_mode=True)
+    else:
+        digest = build_digest(now_local, sms_mode=False)
     print(f"Digest built ({len(digest)} characters)")
     
     print("Sending email...")
-    send_email(subject="Morning Brief", body=digest)
+    send_email(subject="Morning Brief", body=digest, sms_mode=sms_mode)
     print("✓ Sent successfully!")
 
 
