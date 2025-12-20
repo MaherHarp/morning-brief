@@ -128,10 +128,17 @@ def main():
     now_utc = datetime.now(timezone.utc)
     now_local = now_utc.astimezone(DETROIT_TZ)
 
+    # Allow test mode via environment variable to bypass time check
+    test_mode = os.environ.get("TEST_MODE", "").lower() == "true"
+    
     # DST-safe: workflow runs at two UTC times; only send when exactly 6:30am Detroit.
-    if not (now_local.hour == 6 and now_local.minute == 30):
+    if not test_mode and not (now_local.hour == 6 and now_local.minute == 30):
         print(f"Not 6:30am Detroit. Local time is {now_local}. Exiting.")
+        print("To test, set TEST_MODE=true in workflow environment variables.")
         return
+
+    if test_mode:
+        print(f"TEST MODE: Running at {now_local} (bypassing time check)")
 
     digest = build_digest(now_local)
     send_email(subject="Morning Brief", body=digest)
