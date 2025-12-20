@@ -30,6 +30,50 @@ def clean(s: str) -> str:
     return re.sub(r"\s+", " ", (s or "").strip())
 
 
+def extract_article_description(url: str, timeout=5):
+    """Try to extract a description from an article URL by fetching meta description or first paragraph."""
+    try:
+        # Skip HN discussion pages
+        if "news.ycombinator.com" in url:
+            return ""
+        
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (compatible; MorningBrief/1.0; +https://github.com/MaherHarp/morning-brief)'
+        }
+        response = requests.get(url, timeout=timeout, headers=headers, allow_redirects=True)
+        response.raise_for_status()
+        
+        html = response.text
+        
+        # Try to get meta description first (most reliable)
+        meta_desc_match = re.search(r'<meta\s+name=["\']description["\']\s+content=["\']([^"\']+)["\']', html, re.IGNORECASE)
+        if meta_desc_match:
+            desc = clean(meta_desc_match.group(1))
+            if len(desc) > 50:  # Make sure it's substantial
+                return desc[:200]  # Limit length
+        
+        # Try Open Graph description
+        og_desc_match = re.search(r'<meta\s+property=["\']og:description["\']\s+content=["\']([^"\']+)["\']', html, re.IGNORECASE)
+        if og_desc_match:
+            desc = clean(og_desc_match.group(1))
+            if len(desc) > 50:
+                return desc[:200]
+        
+        # Try to get first paragraph from <p> tags
+        p_match = re.search(r'<p[^>]*>([^<]+)</p>', html, re.IGNORECASE | re.DOTALL)
+        if p_match:
+            desc = clean(p_match.group(1))
+            # Filter out very short paragraphs (likely navigation/menu items)
+            if len(desc) > 80 and len(desc) < 500:
+                return desc[:200]
+        
+    except Exception as e:
+        # Silently fail - we'll just not have a description
+        pass
+    
+    return ""
+
+
 def pick_top_from_rss(url: str):
     feed = feedparser.parse(url)
     if not getattr(feed, "entries", None):
@@ -96,19 +140,37 @@ def fetch_hn_top(n=5, timeout=20):
         if not title:
             continue
         
-        # Hacker News doesn't have descriptions in the API, but we can use the score/comments as context
-        score = data.get("score", 0)
-        descendants = data.get("descendants", 0)  # number of comments
-        
-        # Create a simple description from metadata
         description = ""
-        if score > 0 or descendants > 0:
-            parts = []
-            if score > 0:
-                parts.append(f"{score} points")
-            if descendants > 0:
-                parts.append(f"{descendants} comments")
-            description = f" • {', '.join(parts)}"
+        
+        # First, check if it's a self-post (has text field)
+        if data.get("text"):
+            # It's a self-post, use the text as description
+            text = clean(data.get("text", ""))
+            # Remove HTML tags if present
+            text = re.sub(r'<[^>]+>', '', text)
+            if len(text) > 100:
+                description = text[:200].rsplit(' ', 1)[0] + "..."
+            else:
+                description = text
+        else:
+            # It's a link post, try to fetch description from the article
+            description = extract_article_description(link, timeout=5)
+        
+        # If we still don't have a description, add score/comments as fallback
+        if not description:
+            score = data.get("score", 0)
+            descendants = data.get("descendants", 0)
+            if score > 0 or descendants > 0:
+                parts = []
+                if score > 0:
+                    parts.append(f"{score} points")
+                if descendants > 0:
+                    parts.append(f"{descendants} comments")
+                description = f" • {', '.join(parts)}"
+        
+        # Truncate description if too long
+        if description and len(description) > 200:
+            description = description[:197].rsplit(' ', 1)[0] + "..."
         
         out.append((title, link, description))
         if len(out) >= n:
@@ -151,7 +213,9 @@ def build_digest(now_local: datetime, sms_mode=False):
         for title, _, desc in fetch_hn_top(n=3):  # Only 3 for SMS
             short_title = title[:50] + "..." if len(title) > 50 else title
             if desc:
-                lines.append(f"• {short_title}{desc}")
+                short_desc = desc[:60] + "..." if len(desc) > 60 else desc
+                lines.append(f"• {short_title}")
+                lines.append(f"  {short_desc}")
             else:
                 lines.append(f"• {short_title}")
         
