@@ -111,6 +111,14 @@ def send_email(subject: str, body: str):
 
     to_email = os.environ["TO_EMAIL"]
     from_email = os.environ.get("FROM_EMAIL", smtp_user)
+    
+    # Check if SMS gateway is configured (for sending to phone number as SMS/iMessage)
+    # Format: 10-digit-phone@gateway (e.g., 1234567890@vtext.com for Verizon)
+    sms_gateway = os.environ.get("SMS_GATEWAY", "").strip()
+    if sms_gateway:
+        # Use SMS gateway to send as text message
+        to_email = sms_gateway
+        print(f"Using SMS gateway: {to_email} (will arrive as text/iMessage)")
 
     print(f"Sending email from {from_email} to {to_email}")
 

@@ -31,6 +31,7 @@ jobs:
           SMTP_PASS: ${{ secrets.SMTP_PASS }}
           TO_EMAIL:  ${{ secrets.TO_EMAIL }}
           FROM_EMAIL: ${{ secrets.FROM_EMAIL }}
+          SMS_GATEWAY: ${{ secrets.SMS_GATEWAY }}
           TEST_MODE: 'true'  # Set to 'true' for testing. For production, use: ${{ github.event_name == 'workflow_dispatch' && 'true' || '' }}
         run: python brief.py
 
