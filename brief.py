@@ -39,7 +39,23 @@ def pick_top_from_rss(url: str):
     link = clean(getattr(e, "link", ""))
     if not title:
         return None
-    return title, link
+    
+    # Get description/summary (RSS feeds usually have one of these)
+    description = ""
+    if hasattr(e, "summary"):
+        description = clean(e.summary)
+    elif hasattr(e, "description"):
+        description = clean(e.description)
+    
+    # Clean HTML tags and truncate to ~150 chars
+    if description:
+        # Remove HTML tags
+        description = re.sub(r'<[^>]+>', '', description)
+        # Truncate to ~150 chars, ending at word boundary
+        if len(description) > 150:
+            description = description[:147].rsplit(' ', 1)[0] + "..."
+    
+    return title, link, description
 
 
 def fetch_espn_top(n=3):
@@ -48,8 +64,23 @@ def fetch_espn_top(n=3):
     for e in getattr(feed, "entries", [])[:n]:
         title = clean(getattr(e, "title", ""))
         link = clean(getattr(e, "link", ""))
-        if title and link:
-            out.append((title, link))
+        if not title or not link:
+            continue
+        
+        # Get description/summary
+        description = ""
+        if hasattr(e, "summary"):
+            description = clean(e.summary)
+        elif hasattr(e, "description"):
+            description = clean(e.description)
+        
+        # Clean HTML tags and truncate
+        if description:
+            description = re.sub(r'<[^>]+>', '', description)
+            if len(description) > 150:
+                description = description[:147].rsplit(' ', 1)[0] + "..."
+        
+        out.append((title, link, description))
     return out
 
 
@@ -61,9 +92,25 @@ def fetch_hn_top(n=5, timeout=20):
         if not data or data.get("type") != "story":
             continue
         title = clean(data.get("title", ""))
-        link = clean(data.get("url") or f"https://news.ycombinator.com/item?id={story_id}")
-        if title and link:
-            out.append((title, link))
+        link = data.get("url") or f"https://news.ycombinator.com/item?id={story_id}"
+        if not title:
+            continue
+        
+        # Hacker News doesn't have descriptions in the API, but we can use the score/comments as context
+        score = data.get("score", 0)
+        descendants = data.get("descendants", 0)  # number of comments
+        
+        # Create a simple description from metadata
+        description = ""
+        if score > 0 or descendants > 0:
+            parts = []
+            if score > 0:
+                parts.append(f"{score} points")
+            if descendants > 0:
+                parts.append(f"{descendants} comments")
+            description = f" • {', '.join(parts)}"
+        
+        out.append((title, link, description))
         if len(out) >= n:
             break
     return out
@@ -74,26 +121,39 @@ def build_digest(now_local: datetime, sms_mode=False):
     date_str = now_local.strftime('%a %b %d')
     
     if sms_mode:
-        # Short SMS version (no links, just headlines)
+        # Short SMS version (no links, just headlines with short descriptions)
         lines.append(f"📰 Brief {date_str}")
         lines.append("🌍 World:")
         for region, url in list(BBC_FEEDS.items())[:3]:  # Only top 3 regions for SMS
             top = pick_top_from_rss(url)
             if top:
-                title, _ = top
+                title, _, desc = top
                 # Truncate long titles
-                short_title = title[:60] + "..." if len(title) > 60 else title
-                lines.append(f"• {region}: {short_title}")
+                short_title = title[:50] + "..." if len(title) > 50 else title
+                if desc:
+                    short_desc = desc[:60] + "..." if len(desc) > 60 else desc
+                    lines.append(f"• {region}: {short_title}")
+                    lines.append(f"  {short_desc}")
+                else:
+                    lines.append(f"• {region}: {short_title}")
         
         lines.append("⚽ Sports:")
-        for title, _ in fetch_espn_top(n=2):  # Only 2 for SMS
-            short_title = title[:60] + "..." if len(title) > 60 else title
-            lines.append(f"• {short_title}")
+        for title, _, desc in fetch_espn_top(n=2):  # Only 2 for SMS
+            short_title = title[:50] + "..." if len(title) > 50 else title
+            if desc:
+                short_desc = desc[:60] + "..." if len(desc) > 60 else desc
+                lines.append(f"• {short_title}")
+                lines.append(f"  {short_desc}")
+            else:
+                lines.append(f"• {short_title}")
         
         lines.append("💻 Tech:")
-        for title, _ in fetch_hn_top(n=3):  # Only 3 for SMS
-            short_title = title[:60] + "..." if len(title) > 60 else title
-            lines.append(f"• {short_title}")
+        for title, _, desc in fetch_hn_top(n=3):  # Only 3 for SMS
+            short_title = title[:50] + "..." if len(title) > 50 else title
+            if desc:
+                lines.append(f"• {short_title}{desc}")
+            else:
+                lines.append(f"• {short_title}")
         
         msg = "\n".join(lines)
         # Limit SMS to ~800 chars (some carriers support longer but be safe)
@@ -110,20 +170,24 @@ def build_digest(now_local: datetime, sms_mode=False):
             if not top:
                 lines.append(f"• {region}: (no items)")
                 continue
-            title, link = top
+            title, link, desc = top
             lines.append(f"• {region}: {title}")
+            if desc:
+                lines.append(f"  {desc}")
             lines.append(f"  {link}")
 
         lines.append("")
         lines.append("\U0001F3C8 Sports (ESPN Top)")
-        for title, link in fetch_espn_top(n=3):
+        for title, link, desc in fetch_espn_top(n=3):
             lines.append(f"• {title}")
+            if desc:
+                lines.append(f"  {desc}")
             lines.append(f"  {link}")
 
         lines.append("")
         lines.append("\U0001F4BB Tech (Hacker News Top)")
-        for title, link in fetch_hn_top(n=5):
-            lines.append(f"• {title}")
+        for title, link, desc in fetch_hn_top(n=5):
+            lines.append(f"• {title}{desc}")
             lines.append(f"  {link}")
 
         msg = "\n".join(lines)
