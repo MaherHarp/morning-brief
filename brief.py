@@ -112,16 +112,27 @@ def send_email(subject: str, body: str):
     to_email = os.environ["TO_EMAIL"]
     from_email = os.environ.get("FROM_EMAIL", smtp_user)
 
+    print(f"Sending email from {from_email} to {to_email}")
+
     msg = MIMEText(body, "plain", "utf-8")
     msg["Subject"] = subject
     msg["From"] = from_email
     msg["To"] = to_email
 
-    context = ssl.create_default_context()
-    with smtplib.SMTP(smtp_host, smtp_port) as server:
-        server.starttls(context=context)
-        server.login(smtp_user, smtp_pass)
-        server.sendmail(from_email, [to_email], msg.as_string())
+    try:
+        context = ssl.create_default_context()
+        print(f"Connecting to {smtp_host}:{smtp_port}...")
+        with smtplib.SMTP(smtp_host, smtp_port) as server:
+            print("Starting TLS...")
+            server.starttls(context=context)
+            print("Logging in...")
+            server.login(smtp_user, smtp_pass)
+            print("Sending email...")
+            server.sendmail(from_email, [to_email], msg.as_string())
+            print("Email sent successfully!")
+    except Exception as e:
+        print(f"Error sending email: {type(e).__name__}: {e}")
+        raise
 
 
 def main():
@@ -129,7 +140,11 @@ def main():
     now_local = now_utc.astimezone(DETROIT_TZ)
 
     # Allow test mode via environment variable to bypass time check
-    test_mode = os.environ.get("TEST_MODE", "").lower() == "true"
+    test_mode_raw = os.environ.get("TEST_MODE", "")
+    test_mode = test_mode_raw.lower() == "true"
+    
+    print(f"TEST_MODE environment variable: '{test_mode_raw}' (interpreted as: {test_mode})")
+    print(f"Current Detroit time: {now_local}")
     
     # DST-safe: workflow runs at two UTC times; only send when exactly 6:30am Detroit.
     if not test_mode and not (now_local.hour == 6 and now_local.minute == 30):
@@ -138,11 +153,15 @@ def main():
         return
 
     if test_mode:
-        print(f"TEST MODE: Running at {now_local} (bypassing time check)")
+        print(f"✓ TEST MODE: Running at {now_local} (bypassing time check)")
 
+    print("Building digest...")
     digest = build_digest(now_local)
+    print(f"Digest built ({len(digest)} characters)")
+    
+    print("Sending email...")
     send_email(subject="Morning Brief", body=digest)
-    print("Sent.")
+    print("✓ Sent successfully!")
 
 
 if __name__ == "__main__":
